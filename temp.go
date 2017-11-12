@@ -11,9 +11,17 @@ import (
 	"strconv"
 	"time"
 )
+var (
+	measurementInterval time.Duration
+)
 
 func main() {
+	measurementInterval = 1 * time.Hour
 	tempMonitor(1)
+
+	http.HandleFunc("/",func(w http.ResponseWriter, req *http.Request) {
+		http.RedirectHandler("https://kaff.se", 404)
+	})
 	http.HandleFunc("/temp", tempHandler)
 	http.HandleFunc("/temp/all", allTempsHandler)
 
@@ -22,7 +30,7 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
-	fmt.Println("Handlers set up.\nListening on:", srv.Addr)
+	fmt.Println("Measuring each", measurementInterval,"\nListening on:", srv.Addr)
 	// Log and run the server
 	log.Fatal(srv.ListenAndServe())
 }
@@ -34,11 +42,13 @@ func tempHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(err.Error()))
 	}
 	j, err := json.MarshalIndent(t, "", " ")
+
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
 	}
-	w.Write([]byte(j))
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(j)
 }
 func allTempsHandler(w http.ResponseWriter, r *http.Request) {
 	data, err := ioutil.ReadFile("temps")
@@ -46,20 +56,21 @@ func allTempsHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
 }
 
 type reading struct {
-	deg float64
-	t   time.Time
+	Deg  float64   `json:"degrees"`
+	Time time.Time `json:"time"`
 }
 
 func (r *reading) string() string {
-	return strconv.FormatFloat(r.deg, 'f', 1, 64) + "⁰C"
+	return strconv.FormatFloat(r.Deg, 'f', 1, 32) + "⁰C"
 }
 
 type temperatures struct {
-	readings []reading
+	Readings []reading `json:"Readings"`
 }
 
 func (t *temperatures) save() error {
@@ -86,32 +97,28 @@ func readTemp() (reading, error) {
 	if err != nil {
 		return reading{}, err
 	}
-
-	t, err := strconv.ParseFloat(string(out)[5:9], 64)
+	tstr := string(out)[5:7] + "." + string(out)[8:9]
+	t, err := strconv.ParseFloat(tstr, 64)
+	if err != nil {
+		return reading{}, err
+	}
 	tmp := reading{
 		t,
 		time.Now(),
 	}
-	/*if err != nil {
-		return reading{}, err
-	}
-	temps, err := loadTemps()
-	if err != nil {
-		return reading{}, err
-	}
-	allTemps := append(temps.readings, tmp)
-	temps.readings = allTemps
-	err = temps.save()
-	if err != nil {
-		return reading{}, err
-	}*/
+
 	return tmp, nil
 }
 func loadTemps() (temperatures, error) {
 	data, err := ioutil.ReadFile("temps")
 	if err != nil {
-		return temperatures{}, err
+		if data == nil {
+			ioutil.WriteFile("temps", nil, os.FileMode(0777))
+		} else {
+			return temperatures{}, err
+		}
 	}
+
 	temps := temperatures{}
 	err = json.Unmarshal(data, &temps)
 	if err != nil {
@@ -129,8 +136,8 @@ func tempMonitor(interval int) error {
 	if err != nil {
 		return err
 	}
-	tmps.readings = append(tmps.readings, read)
-	t := time.NewTicker(1 * time.Hour)
+	tmps.Readings = append(tmps.Readings, read)
+	t := time.NewTicker(measurementInterval)
 	quit := make(chan struct{})
 	go func() {
 		for {
@@ -140,8 +147,8 @@ func tempMonitor(interval int) error {
 				if err != nil {
 					return
 				}
-				log.Println("New reading:", r.deg)
-				tmps.readings = append(tmps.readings, r)
+				log.Println("New reading:", r.Deg)
+				tmps.Readings = append(tmps.Readings, r)
 				tmps.save()
 			case <-quit:
 				t.Stop()
