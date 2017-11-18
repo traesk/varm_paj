@@ -9,17 +9,20 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
-var (
-	measurementInterval time.Duration
-)
+
+const measurementInterval = 15 * time.Minute
+
+func fileName() string {
+	return strings.ToLower("temps" + "-" + time.Now().Month().String() + "-" + strconv.Itoa(time.Now().Year()))
+}
 
 func main() {
-	measurementInterval = 1 * time.Hour
-	tempMonitor(1)
+	tempMonitor()
 
-	http.HandleFunc("/",func(w http.ResponseWriter, req *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		http.RedirectHandler("https://kaff.se", 404)
 	})
 	http.HandleFunc("/temp", tempHandler)
@@ -30,7 +33,7 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
-	fmt.Println("Measuring each", measurementInterval,"\nListening on:", srv.Addr)
+	fmt.Println("Measuring each", measurementInterval, "\nListening on:", srv.Addr)
 	// Log and run the server
 	log.Fatal(srv.ListenAndServe())
 }
@@ -51,7 +54,7 @@ func tempHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(j)
 }
 func allTempsHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := ioutil.ReadFile("temps")
+	data, err := ioutil.ReadFile(fileName())
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
@@ -78,7 +81,7 @@ func (t *temperatures) save() error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile("temps", j, os.FileMode(0777))
+	err = ioutil.WriteFile(fileName(), j, os.FileMode(0777))
 	if err != nil {
 		return err
 	}
@@ -110,30 +113,38 @@ func readTemp() (reading, error) {
 	return tmp, nil
 }
 func loadTemps() (temperatures, error) {
-	data, err := ioutil.ReadFile("temps")
+
+	data, err := ioutil.ReadFile(fileName())
 	if err != nil {
 		if data == nil {
-			ioutil.WriteFile("temps", nil, os.FileMode(0777))
+			fmt.Println("No previous file, creating a new file:", fileName())
+			ioutil.WriteFile(fileName(), nil, os.FileMode(0777))
 		} else {
 			return temperatures{}, err
 		}
 	}
 
 	temps := temperatures{}
+
 	err = json.Unmarshal(data, &temps)
+
 	if err != nil {
-		return temperatures{}, err
+		if data != nil {
+			return temperatures{}, err
+		}
 	}
+
 	return temps, nil
 }
-func tempMonitor(interval int) error {
+func tempMonitor() error {
 	tmps, err := loadTemps()
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
-	fmt.Println("Started temperature monitoring")
 	read, err := readTemp()
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 	tmps.Readings = append(tmps.Readings, read)
@@ -147,7 +158,7 @@ func tempMonitor(interval int) error {
 				if err != nil {
 					return
 				}
-				log.Println("New reading:", r.Deg)
+				fmt.Println("New reading:", r.Deg)
 				tmps.Readings = append(tmps.Readings, r)
 				tmps.save()
 			case <-quit:
