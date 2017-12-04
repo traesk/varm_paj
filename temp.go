@@ -39,6 +39,8 @@ func main() {
 }
 
 func tempHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	t, err := readTemp()
 	if err != nil {
 		w.WriteHeader(500)
@@ -50,7 +52,7 @@ func tempHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		w.Write([]byte(err.Error()))
 	}
-	w.Header().Set("Content-Type", "application/json")
+
 	w.Write(j)
 }
 func allTempsHandler(w http.ResponseWriter, r *http.Request) {
